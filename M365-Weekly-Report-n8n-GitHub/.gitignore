@@ -1,0 +1,26 @@
+# n8n / local
+.n8n/
+.env
+.env.*
+*.log
+
+# Credentials / secrets
+credentials.json
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Generated reports
+*.xlsx
+*.csv
+reports/
+output/
+exports/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

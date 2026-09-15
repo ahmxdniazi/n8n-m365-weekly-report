@@ -1,0 +1,9 @@
+{
+  "project": "M365 Weekly Report Automation",
+  "platform": "n8n",
+  "workflow_file": "workflow/M365-Weekly-Report.json",
+  "nodes": 25,
+  "status": "production-oriented template",
+  "public_safe": true,
+  "default_skip_email_send": true
+}

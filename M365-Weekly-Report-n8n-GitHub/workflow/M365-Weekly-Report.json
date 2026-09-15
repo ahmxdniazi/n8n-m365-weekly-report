@@ -1,0 +1,821 @@
+{
+  "name": "M365 Weekly Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "trigger-schedule",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Central configuration - mirrors the CONFIGURATION region of M365-WeeklyReport.ps1.\n// No credentials or secrets live here - authentication is handled entirely via the\n// n8n credential attached to the HTTP Request nodes.\n\nreturn [{\n  json: {\n    graphBaseUrl: 'https://graph.microsoft.com/v1.0',\n\n    organisationName: 'Your Organisation',\n    reportOwner: 'IT Infrastructure Team',\n\n    senderMailbox: 'reports@example.com',\n    recipientEmails: ['recipient@example.com'],\n    ccEmails: [],\n\n    sharePointSiteId: 'REPLACE_WITH_SHAREPOINT_SITE_ID',\n    sharePointFolderPath: '/Reports/M365WeeklyReport',\n    skipEmailSend: true,\n\n    domainDisplayNames: {\n      'bkk.example': 'BKK',\n      'threedot.example': 'threedot.example',\n      'example.com': 'example.com',\n      'example.org': 'example.org'\n    },\n    alwaysIncludeDomains: ['bkk.example', 'threedot.example', 'example.com'],\n    minUsersForOwnTab: 3,\n    excludeOnMicrosoftDomain: true,\n\n    highUsagePct: 90,\n    mediumUsagePct: 70,\n\n    // 0 = Sunday .. 6 = Saturday. Anchor day used by 'Reporting Period Logic'.\n    weekEndingDayOfWeek: 0,\n\n    excludedSkus: [\n      'POWER_BI_PRO',\n      'WINDOWS_STORE',\n      'FLOW_FREE',\n      'POWER_BI_STANDARD',\n      'Teams_Premium_(for_Departments)',\n      'RIGHTSMANAGEMENT_ADHOC',\n      'POWERAPPS_DEV'\n    ],\n\n    skuFriendlyNames: {\n      'O365_BUSINESS_ESSENTIALS': 'Microsoft 365 Business Basic',\n      'O365_BUSINESS_PREMIUM': 'Microsoft 365 Business Standard',\n      'SPB': 'Microsoft 365 Business Premium',\n      'SPE_E3': 'Microsoft 365 E3',\n      'SPE_E5': 'Microsoft 365 E5',\n      'ENTERPRISEPACK': 'Office 365 E3',\n      'ENTERPRISEPREMIUM': 'Office 365 E5',\n      'EXCHANGESTANDARD': 'Exchange Online (Plan 1)',\n      'EXCHANGEENTERPRISE': 'Exchange Online (Plan 2)',\n      'AAD_PREMIUM': 'Microsoft Entra ID P1',\n      'AAD_PREMIUM_P2': 'Microsoft Entra ID P2',\n      'MCOMEETADV': 'Microsoft Teams Audio Conferencing',\n      'TEAMS_EXPLORATORY': 'Microsoft Teams Exploratory',\n      'PROJECTPROFESSIONAL': 'Project Plan 3',\n      'VISIOCLIENT': 'Visio Plan 2',\n      'MICROSOFT_BUSINESS_CENTER': 'Microsoft Business Center',\n      'POWER_BI_STANDARD': 'Power BI (Free)'\n    }\n  }\n}];"
+      },
+      "id": "code-config",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.graphBaseUrl }}/organization",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "id": "http-get-organisation",
+      "name": "Get Organisation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "PLACEHOLDER_GRAPH_CREDENTIAL_ID",
+          "name": "Microsoft Graph - App Only (Client Credentials)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Soft-fail handling for the organisation lookup, matching the PS script's\n// try { Get-MgOrganization } catch { } - a failure here must NOT abort the run,\n// and must NOT be hidden: we surface organisationLookupFailed downstream instead.\n\nconst cfg = $('Config').first().json;\nconst input = $input.first().json;\n\nlet displayName = null;\nlet verifiedDomains = [];\nlet orgLookupFailed = false;\n\nif (input && Array.isArray(input.value) && input.value.length > 0) {\n  const o = input.value[0];\n  displayName = o.displayName || null;\n  verifiedDomains = Array.isArray(o.verifiedDomains) ? o.verifiedDomains.map(d => d.name) : [];\n} else {\n  orgLookupFailed = true;\n}\n\nreturn [{\n  json: {\n    tenantDisplayName: displayName || cfg.organisationName,\n    verifiedDomains,\n    orgLookupFailed\n  }\n}];"
+      },
+      "id": "code-handle-org-result",
+      "name": "Handle Organisation Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.graphBaseUrl }}/subscribedSkus",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "id": "http-get-skus",
+      "name": "Get Subscribed SKUs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "PLACEHOLDER_GRAPH_CREDENTIAL_ID",
+          "name": "Microsoft Graph - App Only (Client Credentials)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Licence/SKU exclusion + friendly-name mapping + utilisation calculation.\n// Mirrors the DATA COLLECTION block of M365-WeeklyReport.ps1 that builds $licenceRows.\n\nconst cfg = $('Config').first().json;\nconst raw = $input.first().json.value || [];\n\nconst excludedSet = new Set(cfg.excludedSkus);\nconst filtered = raw.filter(s => !excludedSet.has(s.skuPartNumber));\n\nconst skuLookup = {};\n\nconst licenceRows = filtered.map(s => {\n  const friendly = cfg.skuFriendlyNames[s.skuPartNumber] || s.skuPartNumber;\n  skuLookup[s.skuId] = friendly;\n\n  const total = Number((s.prepaidUnits && s.prepaidUnits.enabled) || 0);\n  const warning = Number((s.prepaidUnits && s.prepaidUnits.warning) || 0);\n  const assigned = Number(s.consumedUnits || 0);\n  const available = total - assigned;\n  const pctUsed = total > 0 ? Math.round((assigned / total) * 10000) / 10000 : 0;\n  const pctWhole = Math.round(pctUsed * 100);\n\n  let status = 'Healthy';\n  if (pctWhole >= cfg.highUsagePct) status = 'Critical';\n  else if (pctWhole >= cfg.mediumUsagePct) status = 'Watch';\n\n  const action = status === 'Critical'\n    ? 'Procure additional seats or reclaim unused licences'\n    : status === 'Watch'\n      ? 'Monitor consumption; plan procurement'\n      : 'No action required';\n\n  return {\n    licenceSku: friendly,\n    skuPartNumber: s.skuPartNumber,\n    totalSeats: total,\n    assigned,\n    available,\n    expiringSoon: warning,\n    utilisation: pctUsed,\n    status,\n    recommendedAction: action\n  };\n});\n\nlicenceRows.sort((a, b) => b.totalSeats - a.totalSeats);\n\nreturn [{ json: { licenceRows, skuLookup } }];"
+      },
+      "id": "code-filter-map-licences",
+      "name": "Filter and Map Licences",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.graphBaseUrl }}/users",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "$select",
+              "value": "id,displayName,userPrincipalName,mail,accountEnabled,department,jobTitle,officeLocation,usageLocation,createdDateTime,assignedLicenses,userType"
+            },
+            {
+              "name": "$count",
+              "value": "true"
+            },
+            {
+              "name": "$top",
+              "value": "999"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "ConsistencyLevel",
+              "value": "eventual"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "paginationMode": "responseContainsNextURL",
+            "nextURL": "={{ $response.body['@odata.nextLink'] }}",
+            "paginationCompleteWhen": "other",
+            "completeExpression": "={{ !$response.body['@odata.nextLink'] }}",
+            "limitPagesFetched": true,
+            "maxRequests": 50,
+            "requestInterval": 250
+          }
+        }
+      },
+      "id": "http-get-users",
+      "name": "Get Users (All Pages)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "PLACEHOLDER_GRAPH_CREDENTIAL_ID",
+          "name": "Microsoft Graph - App Only (Client Credentials)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Replaces the Graph SDK's -All pagination handling: each n8n pagination cycle\n// produces one item per page fetched; concatenate every page's value[] array.\n\nconst pages = $input.all();\nlet users = [];\n\nfor (const page of pages) {\n  const body = page.json;\n  if (body && Array.isArray(body.value)) {\n    users = users.concat(body.value);\n  }\n}\n\nreturn [{ json: { users, totalFetched: users.length } }];"
+      },
+      "id": "code-flatten-users",
+      "name": "Flatten Paginated Users",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Per-user normalisation - mirrors the foreach ($u in $users) block in the .ps1:\n// domain extraction, licence-name resolution via skuLookup, status/type, account age.\n\nconst skuLookup = $('Filter and Map Licences').first().json.skuLookup;\nconst users = $input.first().json.users;\nconst now = Date.now();\n\nconst userReport = users.map(u => {\n  const upn = u.userPrincipalName || '';\n  const domain = upn.includes('@') ? upn.split('@').pop().toLowerCase() : 'unknown';\n\n  const licenceNames = [];\n  if (Array.isArray(u.assignedLicenses)) {\n    for (const al of u.assignedLicenses) {\n      const key = al.skuId;\n      if (key && skuLookup[key]) licenceNames.push(skuLookup[key]);\n    }\n  }\n  const uniqueLicenceNames = Array.from(new Set(licenceNames)).sort();\n  const licenceText = uniqueLicenceNames.length > 0 ? uniqueLicenceNames.join('; ') : 'Unlicensed';\n\n  let dateCreated = null;\n  let accountAgeDays = null;\n  if (u.createdDateTime) {\n    dateCreated = u.createdDateTime;\n    accountAgeDays = Math.floor((now - new Date(u.createdDateTime).getTime()) / 86400000);\n  }\n\n  return {\n    displayName: u.displayName || 'Unknown',\n    emailAddress: upn,\n    domain,\n    department: u.department || 'Not specified',\n    jobTitle: u.jobTitle || 'Not specified',\n    office: u.officeLocation || 'Not specified',\n    accountStatus: u.accountEnabled ? 'Active' : 'Blocked',\n    accountType: u.userType || 'Member',\n    licencesAssigned: licenceText,\n    licenceCount: uniqueLicenceNames.length,\n    dateCreated,\n    accountAgeDays\n  };\n});\n\nuserReport.sort((a, b) =>\n  a.domain.localeCompare(b.domain) ||\n  a.department.localeCompare(b.department) ||\n  a.displayName.localeCompare(b.displayName)\n);\n\nreturn [{ json: { userReport, totalUsers: userReport.length } }];"
+      },
+      "id": "code-normalise-users",
+      "name": "Normalise Users",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Domain segmentation - mirrors the 'Segmenting accounts by e-mail domain' block:\n// dedicated-worksheet eligibility rules (always-include, minimum count, .onmicrosoft.com exclusion)\n// plus the per-domain summary used on the Executive Summary sheet.\n\nconst cfg = $('Config').first().json;\nconst { userReport, totalUsers } = $input.first().json;\n\nconst groups = {};\nfor (const u of userReport) {\n  if (!groups[u.domain]) groups[u.domain] = [];\n  groups[u.domain].push(u);\n}\n\nconst domainGroupsArr = Object.entries(groups)\n  .map(([domain, rows]) => ({ domain, rows }))\n  .sort((a, b) => b.rows.length - a.rows.length);\n\nconst dedicatedDomains = [];\nfor (const g of domainGroupsArr) {\n  const d = g.domain;\n  if (cfg.excludeOnMicrosoftDomain && d.endsWith('.onmicrosoft.com')) continue;\n  const isMapped = Object.prototype.hasOwnProperty.call(cfg.domainDisplayNames, d);\n  if (isMapped || g.rows.length >= cfg.minUsersForOwnTab) {\n    if (!dedicatedDomains.includes(d)) dedicatedDomains.push(d);\n  }\n}\nfor (const d of cfg.alwaysIncludeDomains) {\n  const dl = d.toLowerCase();\n  if (!dedicatedDomains.includes(dl)) dedicatedDomains.push(dl);\n}\n\nconst domainSummary = domainGroupsArr.map(g => {\n  const rows = g.rows;\n  const active = rows.filter(r => r.accountStatus === 'Active').length;\n  const blocked = rows.filter(r => r.accountStatus === 'Blocked').length;\n  const licensed = rows.filter(r => r.licenceCount > 0).length;\n  const unlicensed = rows.filter(r => r.licenceCount === 0).length;\n  return {\n    domain: g.domain,\n    totalAccounts: rows.length,\n    active,\n    blocked,\n    licensed,\n    unlicensed,\n    shareOfTenant: totalUsers > 0 ? Math.round((rows.length / totalUsers) * 10000) / 10000 : 0,\n    dedicatedWorksheet: dedicatedDomains.includes(g.domain) ? 'Yes' : 'No'\n  };\n});\n\nreturn [{ json: { dedicatedDomains, domainSummary } }];"
+      },
+      "id": "code-domain-segmentation",
+      "name": "Compute Domain Segmentation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Headline figures - mirrors the 'Headline figures' block of the .ps1.\n\nconst { userReport, totalUsers } = $('Normalise Users').first().json;\nconst { licenceRows } = $('Filter and Map Licences').first().json;\nconst { domainSummary } = $input.first().json;\n\nconst activeUsers = userReport.filter(u => u.accountStatus === 'Active').length;\nconst blockedUsers = userReport.filter(u => u.accountStatus === 'Blocked').length;\nconst unlicensed = userReport.filter(u => u.licenceCount === 0).length;\nconst guestUsers = userReport.filter(u => u.accountType === 'Guest').length;\n\nconst totalSeats = licenceRows.reduce((s, l) => s + l.totalSeats, 0);\nconst totalAssigned = licenceRows.reduce((s, l) => s + l.assigned, 0);\nconst totalAvailable = totalSeats - totalAssigned;\nconst totalPct = totalSeats > 0 ? Math.round((totalAssigned / totalSeats) * 1000) / 10 : 0;\n\nreturn [{\n  json: {\n    totalUsers,\n    activeUsers,\n    blockedUsers,\n    unlicensed,\n    guestUsers,\n    totalSeats,\n    totalAssigned,\n    totalAvailable,\n    totalPct,\n    domainsInUse: domainSummary.length\n  }\n}];"
+      },
+      "id": "code-compute-kpis",
+      "name": "Compute KPIs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Blocked Accounts + unlicensed analysis - mirrors the Blocked Accounts worksheet logic,\n// including the 'still holding a licence' reclamation-candidate flag.\n\nconst { userReport } = $('Normalise Users').first().json;\n\nconst blockedRows = userReport\n  .filter(u => u.accountStatus === 'Blocked')\n  .sort((a, b) => a.domain.localeCompare(b.domain) || a.displayName.localeCompare(b.displayName));\n\nconst unlicensedRows = userReport.filter(u => u.licenceCount === 0);\nconst reclamationCandidates = blockedRows.filter(u => u.licenceCount > 0).length;\n\nreturn [{\n  json: {\n    blockedRows,\n    blockedCount: blockedRows.length,\n    unlicensedRows,\n    unlicensedCount: unlicensedRows.length,\n    reclamationCandidates\n  }\n}];"
+      },
+      "id": "code-blocked-unlicensed",
+      "name": "Blocked and Unlicensed Accounts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Reporting-period logic - a genuine week-ending calculation, replacing the .ps1's\n// 'just relabel today as week ending' behaviour. See the sticky note above this node.\n\nconst cfg = $('Config').first().json;\nconst now = new Date();\n\nconst targetDow = typeof cfg.weekEndingDayOfWeek === 'number' ? cfg.weekEndingDayOfWeek : 0;\nconst currentDow = now.getDay();\nlet diff = currentDow - targetDow;\nif (diff < 0) diff += 7;\n\nconst weekEndingDate = new Date(now);\nweekEndingDate.setDate(now.getDate() - diff);\nweekEndingDate.setHours(0, 0, 0, 0);\n\nconst dateStamp = weekEndingDate.toISOString().slice(0, 10);\nconst reportDateLong = weekEndingDate.toLocaleDateString('en-GB', {\n  weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'\n});\n\nreturn [{\n  json: {\n    dateStamp,\n    reportDateLong,\n    generatedAt: now.toISOString(),\n    weekEndingIso: weekEndingDate.toISOString()\n  }\n}];"
+      },
+      "id": "code-reporting-period",
+      "name": "Reporting Period Logic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Previous-week comparison - see the sticky note above this node for what this can\n// and cannot be relied on for. Uses n8n workflow static data; no external dependency,\n// but only one prior snapshot is retained.\n\nconst staticData = $getWorkflowStaticData('global');\nconst kpis = $('Compute KPIs').first().json;\nconst { licenceRows } = $('Filter and Map Licences').first().json;\nconst period = $('Reporting Period Logic').first().json;\n\nconst currentSnapshot = {\n  weekEndingIso: period.weekEndingIso,\n  totalUsers: kpis.totalUsers,\n  activeUsers: kpis.activeUsers,\n  blockedUsers: kpis.blockedUsers,\n  unlicensed: kpis.unlicensed,\n  guestUsers: kpis.guestUsers,\n  totalSeats: kpis.totalSeats,\n  totalAssigned: kpis.totalAssigned,\n  totalPct: kpis.totalPct,\n  licenceUtilisationBySku: Object.fromEntries(licenceRows.map(l => [l.skuPartNumber, l.utilisation]))\n};\n\nconst previousSnapshot = staticData.previousSnapshot || null;\n\nlet comparisonAvailable = false;\nlet comparison = null;\n\nif (previousSnapshot && previousSnapshot.weekEndingIso !== currentSnapshot.weekEndingIso) {\n  comparisonAvailable = true;\n  comparison = {\n    previousWeekEndingIso: previousSnapshot.weekEndingIso,\n    totalUsersDelta: currentSnapshot.totalUsers - previousSnapshot.totalUsers,\n    activeUsersDelta: currentSnapshot.activeUsers - previousSnapshot.activeUsers,\n    blockedUsersDelta: currentSnapshot.blockedUsers - previousSnapshot.blockedUsers,\n    unlicensedDelta: currentSnapshot.unlicensed - previousSnapshot.unlicensed,\n    totalAssignedDelta: currentSnapshot.totalAssigned - previousSnapshot.totalAssigned,\n    totalPctDelta: Math.round((currentSnapshot.totalPct - previousSnapshot.totalPct) * 10) / 10\n  };\n}\n\n// Persist this run's snapshot so next week's run can compare against it.\nstaticData.previousSnapshot = currentSnapshot;\n\nreturn [{\n  json: {\n    comparisonAvailable,\n    comparison\n  }\n}];"
+      },
+      "id": "code-previous-week-comparison",
+      "name": "Previous-Week Comparison",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Final consolidation - the single output contract for the not-yet-built Excel/email\n// workflow. Nothing here fabricates data: organisationLookupFailed is carried through\n// as an explicit flag rather than masked.\n\nconst cfg = $('Config').first().json;\nconst org = $('Handle Organisation Result').first().json;\nconst { licenceRows } = $('Filter and Map Licences').first().json;\nconst { userReport } = $('Normalise Users').first().json;\nconst { dedicatedDomains, domainSummary } = $('Compute Domain Segmentation').first().json;\nconst kpis = $('Compute KPIs').first().json;\nconst blocked = $('Blocked and Unlicensed Accounts').first().json;\nconst period = $('Reporting Period Logic').first().json;\nconst comparison = $('Previous-Week Comparison').first().json;\n\nreturn [{\n  json: {\n    meta: {\n      tenantDisplayName: org.tenantDisplayName,\n      verifiedDomains: org.verifiedDomains,\n      organisationLookupFailed: org.orgLookupFailed,\n      organisationName: cfg.organisationName,\n      reportOwner: cfg.reportOwner,\n      dateStamp: period.dateStamp,\n      reportDateLong: period.reportDateLong,\n      generatedAt: period.generatedAt\n    },\n    kpis,\n    licenceRows,\n    userReport,\n    domainSummary,\n    dedicatedDomains,\n    blockedRows: blocked.blockedRows,\n    blockedCount: blocked.blockedCount,\n    unlicensedRows: blocked.unlicensedRows,\n    unlicensedCount: blocked.unlicensedCount,\n    reclamationCandidates: blocked.reclamationCandidates,\n    weekOverWeek: {\n      available: comparison.comparisonAvailable,\n      deltas: comparison.comparison\n    },\n    distribution: {\n      senderMailbox: cfg.senderMailbox,\n      recipientEmails: cfg.recipientEmails,\n      ccEmails: cfg.ccEmails\n    }\n  }\n}];"
+      },
+      "id": "code-assemble-dataset",
+      "name": "Assemble Consolidated Report Dataset",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Builds the full multi-sheet workbook with exceljs, mirroring the EXCEL WORKBOOK\n// region of M365-WeeklyReport.ps1. See the sticky notes above for the hard\n// exceljs dependency and the known fidelity gaps vs. the original EPPlus output.\n\nconst ExcelJS = require('exceljs');\n\nconst data = $input.first().json;\n\nconst requiredFields = ['meta', 'kpis', 'licenceRows', 'userReport', 'domainSummary', 'dedicatedDomains', 'blockedRows'];\nconst missing = requiredFields.filter(function (k) { return !(k in data); });\nif (missing.length > 0) {\n  throw new Error('Consolidated dataset is missing required field(s): ' + missing.join(', ') + '. Refusing to build a workbook from incomplete data.');\n}\n\nconst meta = data.meta;\nconst cfg = $('Config').first().json;\nconst domainDisplayNames = cfg.domainDisplayNames || {};\nconst highUsagePct = typeof cfg.highUsagePct === 'number' ? cfg.highUsagePct : 90;\nconst mediumUsagePct = typeof cfg.mediumUsagePct === 'number' ? cfg.mediumUsagePct : 70;\nconst kpis = data.kpis;\nconst licenceRows = data.licenceRows;\nconst userReport = data.userReport;\nconst domainSummary = data.domainSummary;\nconst dedicatedDomains = data.dedicatedDomains;\nconst blockedRows = data.blockedRows;\n\n// ---- Corporate palette (presentation-only - not business logic, defined locally) ----\nconst PALETTE = {\n  headerBg: 'FF1F3864', headerText: 'FFFFFFFF', title: 'FF1F3864', accent: 'FF2E5E9E',\n  bandFill: 'FFF2F5FA',\n  goodBg: 'FFE2EFDA', goodText: 'FF375623',\n  watchBg: 'FFFFF2CC', watchText: 'FF7F6000',\n  criticalBg: 'FFFBE5E5', criticalText: 'FF9C0006',\n  borderGrey: 'FFC8CDD7'\n};\n\nfunction statusColours(status) {\n  if (status === 'Blocked' || status === 'Critical') return { bg: PALETTE.criticalBg, fg: PALETTE.criticalText };\n  if (status === 'Watch') return { bg: PALETTE.watchBg, fg: PALETTE.watchText };\n  return { bg: PALETTE.goodBg, fg: PALETTE.goodText };\n}\n\n// ---- Worksheet name sanitising: Excel max 31 chars, no : \\ / ? * [ ] ----\nfunction safeSheetName(name) {\n  let clean = String(name).replace(/[:\\\\\\/\\?\\*\\[\\]]/g, '-').trim();\n  if (clean.length > 31) clean = clean.substring(0, 31);\n  if (!clean) clean = 'Sheet';\n  return clean;\n}\nconst usedNames = new Set();\nfunction uniqueSheetName(name) {\n  const base = safeSheetName(name);\n  let candidate = base;\n  let i = 2;\n  while (usedNames.has(candidate.toLowerCase())) {\n    const suffix = ' (' + i + ')';\n    const trim = Math.min(base.length, 31 - suffix.length);\n    candidate = base.substring(0, trim) + suffix;\n    i++;\n  }\n  usedNames.add(candidate.toLowerCase());\n  return candidate;\n}\n\nfunction escAmp(s) { return String(s == null ? '' : s).replace(/&/g, '&&'); }\n\n// ---- Column width approximation - exceljs has no native AutoFitColumns ----\nfunction autoFitColumn(ws, colIndex, values, opts) {\n  const min = (opts && opts.min) || 9;\n  const max = (opts && opts.max) || 55;\n  let widest = 0;\n  for (const v of values) {\n    const len = v == null ? 0 : String(v).length;\n    if (len > widest) widest = len;\n  }\n  ws.getColumn(colIndex).width = Math.max(min, Math.min(max, widest + 2));\n}\n\nconst workbook = new ExcelJS.Workbook();\nworkbook.creator = meta.reportOwner;\nworkbook.lastModifiedBy = meta.reportOwner;\nworkbook.created = new Date();\nworkbook.modified = new Date();\n\n// ============================================================================\n// Shared sheet styling helper - equivalent of Format-ReportSheet in the .ps1\n// ============================================================================\nfunction formatReportSheet(ws, opts) {\n  const title = opts.title;\n  const subtitle = opts.subtitle;\n  const headerRow = opts.headerRow || 4;\n  const columnCount = opts.columnCount || 1;\n  const lastDataRow = opts.lastDataRow || 4;\n  const noFreeze = !!opts.noFreeze;\n  const lastCol = Math.max(columnCount, 1);\n\n  ws.mergeCells(1, 1, 1, lastCol);\n  const titleCell = ws.getCell(1, 1);\n  titleCell.value = title;\n  titleCell.font = { size: 16, bold: true, color: { argb: PALETTE.title } };\n  titleCell.alignment = { vertical: 'middle' };\n  ws.getRow(1).height = 26;\n\n  ws.mergeCells(2, 1, 2, lastCol);\n  const subCell = ws.getCell(2, 1);\n  subCell.value = subtitle || (meta.tenantDisplayName + '  |  ' + meta.reportDateLong);\n  subCell.font = { size: 10, italic: true, color: { argb: 'FF5A5A5A' } };\n  for (let c = 1; c <= lastCol; c++) {\n    ws.getCell(2, c).border = { bottom: { style: 'medium', color: { argb: PALETTE.accent } } };\n  }\n\n  if (lastDataRow >= headerRow) {\n    for (let c = 1; c <= lastCol; c++) {\n      const hc = ws.getCell(headerRow, c);\n      hc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PALETTE.headerBg } };\n      hc.font = { bold: true, color: { argb: PALETTE.headerText } };\n      hc.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };\n    }\n    ws.getRow(headerRow).height = 30;\n\n    for (let r = headerRow + 1; r <= lastDataRow; r++) {\n      for (let c = 1; c <= lastCol; c++) {\n        const cell = ws.getCell(r, c);\n        cell.alignment = Object.assign({ vertical: 'middle' }, cell.alignment);\n        cell.border = {\n          top: { style: 'thin', color: { argb: PALETTE.borderGrey } },\n          bottom: { style: 'thin', color: { argb: PALETTE.borderGrey } },\n          left: { style: 'thin', color: { argb: PALETTE.borderGrey } },\n          right: { style: 'thin', color: { argb: PALETTE.borderGrey } }\n        };\n      }\n    }\n\n    ws.views = noFreeze\n      ? [{ showGridLines: false }]\n      : [{ state: 'frozen', ySplit: headerRow, showGridLines: false }];\n  } else {\n    ws.views = [{ showGridLines: false }];\n  }\n\n  ws.pageSetup = {\n    orientation: 'landscape',\n    fitToPage: true,\n    fitToWidth: 1,\n    fitToHeight: 0,\n    margins: { top: 0.5, bottom: 0.5, left: 0.4, right: 0.4, header: 0.2, footer: 0.2 }\n  };\n  if (lastDataRow >= headerRow) {\n    ws.pageSetup.printTitlesRow = headerRow + ':' + headerRow;\n  }\n  ws.headerFooter = {\n    oddFooter: '&L' + escAmp(meta.tenantDisplayName) + ' - Microsoft 365 Weekly Report&CConfidential - Internal Use Only&RPage &P of &N'\n  };\n}\n\nfunction addStatusFormatting(ws, colIndex, headerRow, lastRow) {\n  for (let r = headerRow + 1; r <= lastRow; r++) {\n    const raw = ws.getCell(r, colIndex).value;\n    const c = statusColours(raw);\n    const cell = ws.getCell(r, colIndex);\n    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: c.bg } };\n    cell.font = Object.assign({ bold: true, color: { argb: c.fg } }, cell.font);\n  }\n}\n\n// ============================================================================\n// WORKSHEET 1 - COVER SHEET\n// ============================================================================\nconst coverName = uniqueSheetName('Cover Sheet');\nconst wsCover = workbook.addWorksheet(coverName);\nwsCover.getColumn(1).width = 34;\nwsCover.getColumn(2).width = 70;\nwsCover.views = [{ showGridLines: false }];\nwsCover.pageSetup = { orientation: 'portrait' };\n\nconst coverLines = [\n  { r: 2, text: meta.tenantDisplayName, size: 22, bold: true, colour: PALETTE.title },\n  { r: 3, text: 'Microsoft 365 - Weekly Tenant Report', size: 16, bold: true, colour: PALETTE.accent },\n  { r: 4, text: meta.reportDateLong, size: 11, bold: false, colour: 'FF5A5A5A' },\n  { r: 7, text: 'REPORT DETAILS', size: 11, bold: true, colour: PALETTE.title }\n];\nfor (const line of coverLines) {\n  const cell = wsCover.getCell('A' + line.r);\n  cell.value = line.text;\n  cell.font = { size: line.size, bold: line.bold, color: { argb: line.colour } };\n}\nfor (let c = 1; c <= 4; c++) {\n  wsCover.getCell(3, c).border = { bottom: { style: 'medium', color: { argb: PALETTE.accent } } };\n}\n\nconst metaRows = [\n  ['Report title', 'Microsoft 365 Weekly Tenant Report'],\n  ['Reporting period', 'Week ending ' + meta.reportDateLong],\n  ['Prepared by', meta.reportOwner],\n  ['Generated on', meta.generatedAt],\n  ['Verified domains', (meta.verifiedDomains && meta.verifiedDomains.length) ? meta.verifiedDomains.join(', ') : 'Not available'],\n  ['Total accounts', kpis.totalUsers],\n  ['Classification', 'Confidential - Internal Use Only'],\n  ['Distribution', (data.distribution.recipientEmails || []).join(', ')]\n];\nlet row = 8;\nfor (const pair of metaRows) {\n  wsCover.getCell('A' + row).value = pair[0];\n  wsCover.getCell('A' + row).font = { bold: true };\n  wsCover.getCell('B' + row).value = String(pair[1]);\n  wsCover.getCell('A' + row).border = { bottom: { style: 'hair' } };\n  wsCover.getCell('B' + row).border = { bottom: { style: 'hair' } };\n  row++;\n}\n\nif (meta.organisationLookupFailed) {\n  row++;\n  const warnCell = wsCover.getCell('A' + row);\n  warnCell.value = 'Note: the tenant organisation lookup failed for this run; the configured organisation name was used instead.';\n  warnCell.font = { italic: true, color: { argb: PALETTE.criticalText } };\n  row++;\n}\n\nrow += 2;\nwsCover.getCell('A' + row).value = 'CONTENTS';\nwsCover.getCell('A' + row).font = { bold: true, size: 11, color: { argb: PALETTE.title } };\nrow++;\nconst contents = [\n  'Executive Summary       - headline metrics and per-domain breakdown',\n  'Licence Utilisation     - seats purchased, assigned, available and status',\n  'Domain worksheets       - one worksheet per e-mail domain',\n  'Blocked Accounts        - accounts with sign-in blocked',\n  'Full User Directory     - complete tenant account listing'\n];\nfor (const c of contents) {\n  wsCover.getCell('A' + row).value = c;\n  row++;\n}\n\nrow += 2;\nwsCover.getCell('A' + row).value = 'STATUS LEGEND';\nwsCover.getCell('A' + row).font = { bold: true, color: { argb: PALETTE.title } };\nrow++;\nconst legend = [\n  { label: 'Healthy / Active', desc: 'Licence utilisation below ' + mediumUsagePct + '% | account sign-in permitted', bg: PALETTE.goodBg, fg: PALETTE.goodText },\n  { label: 'Watch', desc: 'Licence utilisation between ' + mediumUsagePct + '% and ' + highUsagePct + '%', bg: PALETTE.watchBg, fg: PALETTE.watchText },\n  { label: 'Critical / Blocked', desc: 'Licence utilisation at or above ' + highUsagePct + '% | sign-in blocked', bg: PALETTE.criticalBg, fg: PALETTE.criticalText }\n];\nfor (const l of legend) {\n  const lc = wsCover.getCell('A' + row);\n  lc.value = l.label;\n  lc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: l.bg } };\n  lc.font = { bold: true, color: { argb: l.fg } };\n  lc.alignment = { horizontal: 'center' };\n  wsCover.getCell('B' + row).value = l.desc;\n  row++;\n}\n\nrow += 2;\nconst noticeCell = wsCover.getCell('A' + row);\nnoticeCell.value = \"This document contains personal and licensing data. Handle in accordance with the organisation's information security policy.\";\nnoticeCell.font = { italic: true, size: 9, color: { argb: 'FF787878' } };\n\n// ============================================================================\n// WORKSHEET 2 - EXECUTIVE SUMMARY\n// ============================================================================\nconst summaryName = uniqueSheetName('Executive Summary');\nconst wsSum = workbook.addWorksheet(summaryName);\n\nconst kpiRows = [\n  ['Total accounts', kpis.totalUsers, 'All member and guest accounts in the tenant'],\n  ['Active accounts', kpis.activeUsers, 'Sign-in permitted'],\n  ['Blocked accounts', kpis.blockedUsers, 'Sign-in blocked - review for licence reclamation'],\n  ['Guest accounts', kpis.guestUsers, 'External collaborators'],\n  ['Unlicensed accounts', kpis.unlicensed, 'No subscription assigned'],\n  ['Total licence seats', kpis.totalSeats, 'Purchased across all reported SKUs'],\n  ['Seats assigned', kpis.totalAssigned, 'Currently consumed'],\n  ['Seats available', kpis.totalAvailable, 'Free capacity for new starters'],\n  ['Overall licence utilisation', kpis.totalPct + '%', 'Assigned seats as a percentage of purchased seats'],\n  ['E-mail domains in use', kpis.domainsInUse, 'Distinct domains detected across all accounts']\n];\nif (data.weekOverWeek && data.weekOverWeek.available && data.weekOverWeek.deltas) {\n  const d = data.weekOverWeek.deltas;\n  kpiRows.push(['Total accounts vs. last week', (d.totalUsersDelta >= 0 ? '+' : '') + d.totalUsersDelta, 'Change since the previous stored snapshot']);\n  kpiRows.push(['Blocked accounts vs. last week', (d.blockedUsersDelta >= 0 ? '+' : '') + d.blockedUsersDelta, 'Change since the previous stored snapshot']);\n}\n\nconst kpiHeaderRow = 4;\nwsSum.getCell('A' + kpiHeaderRow).value = 'Metric';\nwsSum.getCell('B' + kpiHeaderRow).value = 'Value';\nwsSum.getCell('C' + kpiHeaderRow).value = 'Commentary';\nkpiRows.forEach(function (r, i) {\n  const rn = kpiHeaderRow + 1 + i;\n  wsSum.getCell('A' + rn).value = r[0];\n  wsSum.getCell('B' + rn).value = r[1];\n  wsSum.getCell('C' + rn).value = r[2];\n});\nconst kpiLastRow = kpiHeaderRow + kpiRows.length;\nformatReportSheet(wsSum, {\n  title: 'Executive Summary',\n  subtitle: meta.tenantDisplayName + '  |  Week ending ' + meta.reportDateLong,\n  headerRow: kpiHeaderRow, columnCount: 3, lastDataRow: kpiLastRow\n});\nfor (let r = kpiHeaderRow + 1; r <= kpiLastRow; r++) {\n  wsSum.getCell('B' + r).alignment = { horizontal: 'center' };\n  wsSum.getCell('B' + r).font = Object.assign({ bold: true }, wsSum.getCell('B' + r).font);\n}\nautoFitColumn(wsSum, 1, ['Metric'].concat(kpiRows.map(function (r) { return r[0]; })));\nautoFitColumn(wsSum, 2, ['Value'].concat(kpiRows.map(function (r) { return r[1]; })));\nautoFitColumn(wsSum, 3, ['Commentary'].concat(kpiRows.map(function (r) { return r[2]; })), { min: 20, max: 60 });\n\nconst domStartRow = kpiLastRow + 3;\nwsSum.getCell('A' + domStartRow).value = 'ACCOUNT DISTRIBUTION BY DOMAIN';\nwsSum.getCell('A' + domStartRow).font = { bold: true, size: 12, color: { argb: PALETTE.title } };\n\nconst domHeaderRow = domStartRow + 1;\nconst domHeaders = ['Domain', 'Total Accounts', 'Active', 'Blocked', 'Licensed', 'Unlicensed', 'Share of Tenant', 'Dedicated Worksheet'];\ndomHeaders.forEach(function (h, i) { wsSum.getCell(domHeaderRow, i + 1).value = h; });\ndomainSummary.forEach(function (d, i) {\n  const rn = domHeaderRow + 1 + i;\n  wsSum.getCell(rn, 1).value = d.domain;\n  wsSum.getCell(rn, 2).value = d.totalAccounts;\n  wsSum.getCell(rn, 3).value = d.active;\n  wsSum.getCell(rn, 4).value = d.blocked;\n  wsSum.getCell(rn, 5).value = d.licensed;\n  wsSum.getCell(rn, 6).value = d.unlicensed;\n  wsSum.getCell(rn, 7).value = d.shareOfTenant;\n  wsSum.getCell(rn, 7).numFmt = '0.0%';\n  wsSum.getCell(rn, 8).value = d.dedicatedWorksheet;\n  if (d.blocked > 0) {\n    wsSum.getCell(rn, 4).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PALETTE.criticalBg } };\n    wsSum.getCell(rn, 4).font = { color: { argb: PALETTE.criticalText }, bold: true };\n  }\n});\nconst domLastRow = domHeaderRow + domainSummary.length;\nfor (let c = 1; c <= 8; c++) {\n  const hc = wsSum.getCell(domHeaderRow, c);\n  hc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PALETTE.headerBg } };\n  hc.font = { bold: true, color: { argb: PALETTE.headerText } };\n  hc.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };\n}\nfor (let r = domHeaderRow + 1; r <= domLastRow; r++) {\n  for (let c = 2; c <= 6; c++) wsSum.getCell(r, c).alignment = { horizontal: 'center' };\n  wsSum.getCell(r, 8).alignment = { horizontal: 'center' };\n}\nautoFitColumn(wsSum, 1, domainSummary.map(function (d) { return d.domain; }));\n\n// ============================================================================\n// WORKSHEET 3 - LICENCE UTILISATION\n// ============================================================================\nconst licName = uniqueSheetName('Licence Utilisation');\nconst wsLic = workbook.addWorksheet(licName);\nconst licHeaderRow = 4;\nconst licHeaders = ['Licence (SKU)', 'SKU Part Number', 'Total Seats', 'Assigned', 'Available', 'Expiring Soon', 'Utilisation', 'Status', 'Recommended Action'];\nlicHeaders.forEach(function (h, i) { wsLic.getCell(licHeaderRow, i + 1).value = h; });\nlicenceRows.forEach(function (l, i) {\n  const rn = licHeaderRow + 1 + i;\n  wsLic.getCell(rn, 1).value = l.licenceSku;\n  wsLic.getCell(rn, 2).value = l.skuPartNumber;\n  wsLic.getCell(rn, 3).value = l.totalSeats;\n  wsLic.getCell(rn, 4).value = l.assigned;\n  wsLic.getCell(rn, 5).value = l.available;\n  wsLic.getCell(rn, 6).value = l.expiringSoon;\n  wsLic.getCell(rn, 7).value = l.utilisation;\n  wsLic.getCell(rn, 7).numFmt = '0.0%';\n  wsLic.getCell(rn, 8).value = l.status;\n  wsLic.getCell(rn, 9).value = l.recommendedAction;\n});\nconst licLastRow = licHeaderRow + licenceRows.length;\nformatReportSheet(wsLic, {\n  title: 'Licence Utilisation Summary',\n  subtitle: meta.tenantDisplayName + '  |  As at ' + meta.generatedAt,\n  headerRow: licHeaderRow, columnCount: 9, lastDataRow: licLastRow\n});\nif (licenceRows.length > 0) {\n  for (let r = licHeaderRow + 1; r <= licLastRow; r++) {\n    for (let c = 3; c <= 6; c++) {\n      wsLic.getCell(r, c).numFmt = '#,##0';\n      wsLic.getCell(r, c).alignment = { horizontal: 'center' };\n    }\n    wsLic.getCell(r, 7).alignment = { horizontal: 'center' };\n    wsLic.getCell(r, 8).alignment = { horizontal: 'center' };\n  }\n  addStatusFormatting(wsLic, 8, licHeaderRow, licLastRow);\n\n  const tot = licLastRow + 1;\n  wsLic.getCell(tot, 1).value = 'TOTAL';\n  wsLic.getCell(tot, 3).value = { formula: 'SUM(C' + (licHeaderRow + 1) + ':C' + licLastRow + ')' };\n  wsLic.getCell(tot, 4).value = { formula: 'SUM(D' + (licHeaderRow + 1) + ':D' + licLastRow + ')' };\n  wsLic.getCell(tot, 5).value = { formula: 'SUM(E' + (licHeaderRow + 1) + ':E' + licLastRow + ')' };\n  wsLic.getCell(tot, 6).value = { formula: 'SUM(F' + (licHeaderRow + 1) + ':F' + licLastRow + ')' };\n  wsLic.getCell(tot, 7).value = { formula: 'IF(C' + tot + '=0,0,D' + tot + '/C' + tot + ')' };\n  wsLic.getCell(tot, 7).numFmt = '0.0%';\n  for (let c = 1; c <= 9; c++) {\n    const cell = wsLic.getCell(tot, c);\n    cell.font = { bold: true };\n    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PALETTE.bandFill } };\n    cell.border = { top: { style: 'double' } };\n  }\n  for (let c = 3; c <= 7; c++) wsLic.getCell(tot, c).alignment = { horizontal: 'center' };\n}\nautoFitColumn(wsLic, 1, licenceRows.map(function (l) { return l.licenceSku; }));\nautoFitColumn(wsLic, 9, licenceRows.map(function (l) { return l.recommendedAction; }), { min: 20, max: 55 });\n\n// ============================================================================\n// WORKSHEETS 4..n - ONE PER DEDICATED DOMAIN, then OTHER DOMAINS, FULL DIRECTORY\n// ============================================================================\nconst userColumns = [\n  ['Display Name', 'displayName'], ['E-mail Address', 'emailAddress'], ['Department', 'department'],\n  ['Job Title', 'jobTitle'], ['Office', 'office'], ['Account Status', 'accountStatus'],\n  ['Account Type', 'accountType'], ['Licences Assigned', 'licencesAssigned'],\n  ['Licence Count', 'licenceCount'], ['Date Created', 'dateCreated'], ['Account Age (Days)', 'accountAgeDays']\n];\n\nfunction addUserWorksheet(sheetName, title, subtitle, rows, includeDomainColumn) {\n  const ws = workbook.addWorksheet(sheetName);\n  const headerRow = 4;\n  const cols = includeDomainColumn ? [['Domain', 'domain']].concat(userColumns) : userColumns;\n\n  if (rows.length === 0) {\n    ws.getCell('A' + headerRow).value = 'No accounts were found for this domain at the time of reporting.';\n    ws.getCell('A' + headerRow).font = { italic: true, color: { argb: 'FF787878' } };\n    formatReportSheet(ws, { title: title, subtitle: subtitle, headerRow: headerRow, columnCount: 4, lastDataRow: headerRow - 1, noFreeze: true });\n    ws.getColumn(1).width = 80;\n    return ws;\n  }\n\n  cols.forEach(function (c, i) { ws.getCell(headerRow, i + 1).value = c[0]; });\n  rows.forEach(function (u, i) {\n    const rn = headerRow + 1 + i;\n    cols.forEach(function (c, ci) {\n      const cell = ws.getCell(rn, ci + 1);\n      const v = u[c[1]];\n      if (c[1] === 'dateCreated' && v) { cell.value = new Date(v); cell.numFmt = 'dd-mmm-yyyy'; }\n      else { cell.value = v; }\n    });\n  });\n  const lastRow = headerRow + rows.length;\n  formatReportSheet(ws, { title: title, subtitle: subtitle, headerRow: headerRow, columnCount: cols.length, lastDataRow: lastRow });\n\n  let statusColIndex = 0, licCountColIndex = 0, licAssignedColIndex = 0, ageColIndex = 0, displayNameColIndex = 0, emailColIndex = 0;\n  cols.forEach(function (c, i) {\n    if (c[1] === 'accountStatus') statusColIndex = i + 1;\n    if (c[1] === 'licenceCount') licCountColIndex = i + 1;\n    if (c[1] === 'licencesAssigned') licAssignedColIndex = i + 1;\n    if (c[1] === 'accountAgeDays') ageColIndex = i + 1;\n    if (c[1] === 'displayName') displayNameColIndex = i + 1;\n    if (c[1] === 'emailAddress') emailColIndex = i + 1;\n  });\n\n  for (let r = headerRow + 1; r <= lastRow; r++) {\n    if (statusColIndex) ws.getCell(r, statusColIndex).alignment = { horizontal: 'center' };\n    if (licCountColIndex) { ws.getCell(r, licCountColIndex).alignment = { horizontal: 'center' }; ws.getCell(r, licCountColIndex).numFmt = '#,##0'; }\n    if (ageColIndex) ws.getCell(r, ageColIndex).alignment = { horizontal: 'center' };\n    if (licAssignedColIndex) ws.getCell(r, licAssignedColIndex).alignment = { wrapText: true };\n  }\n  if (statusColIndex) addStatusFormatting(ws, statusColIndex, headerRow, lastRow);\n  if (licAssignedColIndex) {\n    ws.getColumn(licAssignedColIndex).width = 42;\n    for (let r = headerRow + 1; r <= lastRow; r++) {\n      const cell = ws.getCell(r, licAssignedColIndex);\n      if (cell.value === 'Unlicensed') {\n        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PALETTE.watchBg } };\n        cell.font = { color: { argb: PALETTE.watchText } };\n      }\n    }\n  }\n\n  const capRow = lastRow + 2;\n  const activeCount = rows.filter(function (u) { return u.accountStatus === 'Active'; }).length;\n  const blockedCountLocal = rows.filter(function (u) { return u.accountStatus === 'Blocked'; }).length;\n  const capCell = ws.getCell('A' + capRow);\n  capCell.value = 'Total records: ' + rows.length + '    |    Active: ' + activeCount + '    |    Blocked: ' + blockedCountLocal;\n  capCell.font = { italic: true, size: 9, color: { argb: 'FF6E6E6E' } };\n\n  if (displayNameColIndex) autoFitColumn(ws, displayNameColIndex, rows.map(function (u) { return u.displayName; }));\n  if (emailColIndex) autoFitColumn(ws, emailColIndex, rows.map(function (u) { return u.emailAddress; }));\n\n  return ws;\n}\n\nfor (const domain of dedicatedDomains) {\n  const friendly = domainDisplayNames[domain] || domain;\n  const rows = userReport.filter(function (u) { return u.domain === domain; });\n  const sheetName = uniqueSheetName(friendly);\n  addUserWorksheet(\n    sheetName,\n    'Accounts - ' + friendly,\n    'Domain: ' + domain + '  |  ' + meta.reportDateLong + '  |  ' + rows.length + ' account(s)',\n    rows,\n    false\n  );\n}\n\nconst otherRows = userReport.filter(function (u) { return dedicatedDomains.indexOf(u.domain) === -1; })\n  .sort(function (a, b) { return a.domain.localeCompare(b.domain) || a.displayName.localeCompare(b.displayName); });\nif (otherRows.length > 0) {\n  const otherSheet = uniqueSheetName('Other Domains');\n  addUserWorksheet(\n    otherSheet,\n    'Accounts - Other Domains',\n    'Consolidated view of domains below the dedicated-worksheet threshold  |  ' + otherRows.length + ' account(s)',\n    otherRows,\n    true\n  );\n}\n\n// ============================================================================\n// BLOCKED ACCOUNTS - distinct column set (matches the .ps1's $blockedCols,\n// deliberately omitting Office/Account Status since every row is Blocked)\n// ============================================================================\nconst blockedSheetName = uniqueSheetName('Blocked Accounts');\nconst blockedCols = [\n  ['Display Name', 'displayName'], ['E-mail Address', 'emailAddress'], ['Domain', 'domain'],\n  ['Department', 'department'], ['Job Title', 'jobTitle'], ['Account Type', 'accountType'],\n  ['Licences Assigned', 'licencesAssigned'], ['Licence Count', 'licenceCount'],\n  ['Date Created', 'dateCreated'], ['Account Age (Days)', 'accountAgeDays']\n];\n\nif (blockedRows.length > 0) {\n  const ws = workbook.addWorksheet(blockedSheetName);\n  const headerRow = 4;\n  blockedCols.forEach(function (c, i) { ws.getCell(headerRow, i + 1).value = c[0]; });\n  blockedRows.forEach(function (u, i) {\n    const rn = headerRow + 1 + i;\n    blockedCols.forEach(function (c, ci) {\n      const cell = ws.getCell(rn, ci + 1);\n      const v = u[c[1]];\n      if (c[1] === 'dateCreated' && v) { cell.value = new Date(v); cell.numFmt = 'dd-mmm-yyyy'; }\n      else { cell.value = v; }\n    });\n  });\n  const lastRow = headerRow + blockedRows.length;\n  formatReportSheet(ws, {\n    title: 'Blocked Accounts',\n    subtitle: 'Accounts with sign-in blocked  |  ' + blockedRows.length + ' account(s)  |  ' + data.reclamationCandidates + ' still holding licences',\n    headerRow: headerRow, columnCount: blockedCols.length, lastDataRow: lastRow\n  });\n\n  const accountTypeCol = 6, licAssignedCol = 7, licCountCol = 8, ageCol = 10;\n  for (let r = headerRow + 1; r <= lastRow; r++) {\n    ws.getCell(r, accountTypeCol).alignment = { horizontal: 'center' };\n    ws.getCell(r, licCountCol).alignment = { horizontal: 'center' };\n    ws.getCell(r, ageCol).alignment = { horizontal: 'center' };\n    ws.getCell(r, licAssignedCol).alignment = { wrapText: true };\n    if (ws.getCell(r, licCountCol).value > 0) {\n      ws.getCell(r, licCountCol).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PALETTE.criticalBg } };\n      ws.getCell(r, licCountCol).font = { bold: true, color: { argb: PALETTE.criticalText } };\n    }\n  }\n  ws.getColumn(licAssignedCol).width = 42;\n\n  const noteRow = lastRow + 2;\n  const noteCell = ws.getCell('A' + noteRow);\n  noteCell.value = 'Note: rows with a licence count greater than zero are consuming paid seats despite being blocked, and are candidates for licence reclamation.';\n  noteCell.font = { italic: true, size: 9, color: { argb: 'FF6E6E6E' } };\n\n  autoFitColumn(ws, 1, blockedRows.map(function (u) { return u.displayName; }));\n  autoFitColumn(ws, 2, blockedRows.map(function (u) { return u.emailAddress; }));\n} else {\n  const ws = workbook.addWorksheet(blockedSheetName);\n  ws.getCell('A4').value = 'No blocked accounts were identified at the time of reporting.';\n  ws.getCell('A4').font = { italic: true };\n  formatReportSheet(ws, { title: 'Blocked Accounts', subtitle: 'No blocked accounts identified', headerRow: 4, columnCount: 4, lastDataRow: 3, noFreeze: true });\n  ws.getColumn(1).width = 80;\n}\n\n// ============================================================================\n// FULL USER DIRECTORY\n// ============================================================================\nconst allSheetName = uniqueSheetName('Full User Directory');\naddUserWorksheet(\n  allSheetName,\n  'Full User Directory',\n  'Complete tenant account listing  |  ' + userReport.length + ' account(s)',\n  userReport,\n  true\n);\n\n// ============================================================================\n// SAVE\n// ============================================================================\nworkbook.views = [{ x: 0, y: 0, width: 10000, height: 20000, firstSheet: 0, activeTab: 0, visibility: 'visible' }];\n\nconst fileName = 'M365_Weekly_Report_' + meta.dateStamp + '.xlsx';\nconst arrayBuffer = await workbook.xlsx.writeBuffer();\nconst binary = await $helpers.prepareBinaryData(\n  Buffer.from(arrayBuffer),\n  fileName,\n  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'\n);\n\nreturn [{\n  json: Object.assign({}, data, {\n    workbookFileName: fileName,\n    workbookSheetCount: workbook.worksheets.length,\n    workbookSheetNames: workbook.worksheets.map(function (w) { return w.name; })\n  }),\n  binary: { workbook: binary }\n}];"
+      },
+      "id": "code-build-workbook",
+      "name": "Build Excel Workbook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3900,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Builds the three CSV exports, matching the .ps1's Export-Csv column sets exactly -\n// including that BlockedAccounts_*.csv used the FULL user-report column set (Office,\n// Account Status included), not the reduced set used only on the Excel Blocked sheet.\n\nconst item = $input.first();\nconst data = item.json;\n\nfunction csvEscape(value) {\n  if (value === null || value === undefined) return '';\n  const s = String(value);\n  if (/[\",\\n\\r]/.test(s)) return '\"' + s.replace(/\"/g, '\"\"') + '\"';\n  return s;\n}\nfunction toCsv(headers, keys, rows) {\n  const lines = [headers.map(csvEscape).join(',')];\n  for (const row of rows) lines.push(keys.map(k => csvEscape(row[k])).join(','));\n  return lines.join('\\r\\n') + '\\r\\n';\n}\n\nconst userHeaders = ['Display Name', 'E-mail Address', 'Domain', 'Department', 'Job Title', 'Office', 'Account Status', 'Account Type', 'Licences Assigned', 'Licence Count', 'Date Created', 'Account Age (Days)'];\nconst userKeys = ['displayName', 'emailAddress', 'domain', 'department', 'jobTitle', 'office', 'accountStatus', 'accountType', 'licencesAssigned', 'licenceCount', 'dateCreated', 'accountAgeDays'];\n\nconst licHeaders = ['Licence (SKU)', 'SKU Part Number', 'Total Seats', 'Assigned', 'Available', 'Expiring Soon', 'Utilisation', 'Status', 'Recommended Action'];\nconst licKeys = ['licenceSku', 'skuPartNumber', 'totalSeats', 'assigned', 'available', 'expiringSoon', 'utilisation', 'status', 'recommendedAction'];\n\nconst userDirectoryCsv = toCsv(userHeaders, userKeys, data.userReport);\nconst licenceCsv = toCsv(licHeaders, licKeys, data.licenceRows);\nconst blockedCsv = toCsv(userHeaders, userKeys, data.blockedRows);\n\nconst dateStamp = data.meta.dateStamp;\n\nconst userDirBinary = await $helpers.prepareBinaryData(Buffer.from(userDirectoryCsv, 'utf8'), 'UserDirectory_' + dateStamp + '.csv', 'text/csv');\nconst licBinary = await $helpers.prepareBinaryData(Buffer.from(licenceCsv, 'utf8'), 'LicenceUtilisation_' + dateStamp + '.csv', 'text/csv');\nconst blockedBinary = await $helpers.prepareBinaryData(Buffer.from(blockedCsv, 'utf8'), 'BlockedAccounts_' + dateStamp + '.csv', 'text/csv');\n\nreturn [{\n  json: data,\n  binary: Object.assign({}, item.binary, {\n    userDirectoryCsv: userDirBinary,\n    licenceCsv: licBinary,\n    blockedCsv: blockedBinary\n  })\n}];"
+      },
+      "id": "code-build-csv-files",
+      "name": "Build CSV Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('Config').first().json.graphBaseUrl }}/sites/{{ $('Config').first().json.sharePointSiteId }}/drive/root:{{ $('Config').first().json.sharePointFolderPath }}/{{ $binary.workbook.fileName }}:/content",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "workbook",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-upload-workbook",
+      "name": "Upload Workbook to SharePoint",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4420,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "PLACEHOLDER_GRAPH_CREDENTIAL_ID",
+          "name": "Microsoft Graph - App Only (Client Credentials)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('Config').first().json.graphBaseUrl }}/sites/{{ $('Config').first().json.sharePointSiteId }}/drive/root:{{ $('Config').first().json.sharePointFolderPath }}/{{ $binary.userDirectoryCsv.fileName }}:/content",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "userDirectoryCsv",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "text/csv"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-upload-user-csv",
+      "name": "Upload User Directory CSV to SharePoint",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4680,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "PLACEHOLDER_GRAPH_CREDENTIAL_ID",
+          "name": "Microsoft Graph - App Only (Client Credentials)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('Config').first().json.graphBaseUrl }}/sites/{{ $('Config').first().json.sharePointSiteId }}/drive/root:{{ $('Config').first().json.sharePointFolderPath }}/{{ $binary.licenceCsv.fileName }}:/content",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "licenceCsv",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "text/csv"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-upload-licence-csv",
+      "name": "Upload Licence Utilisation CSV to SharePoint",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4940,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "PLACEHOLDER_GRAPH_CREDENTIAL_ID",
+          "name": "Microsoft Graph - App Only (Client Credentials)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('Config').first().json.graphBaseUrl }}/sites/{{ $('Config').first().json.sharePointSiteId }}/drive/root:{{ $('Config').first().json.sharePointFolderPath }}/{{ $binary.blockedCsv.fileName }}:/content",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "blockedCsv",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "text/csv"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-upload-blocked-csv",
+      "name": "Upload Blocked Accounts CSV to SharePoint",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5200,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "PLACEHOLDER_GRAPH_CREDENTIAL_ID",
+          "name": "Microsoft Graph - App Only (Client Credentials)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pulls the SharePoint webUrl of each uploaded file out of the four upload responses.\n// Only the workbook's link is surfaced in the email body (matching the .ps1's original\n// framing of 'the workbook is attached, supporting files are archived alongside it'),\n// but all four are captured here for a complete run summary.\n\nconst item = $input.first();\nconst workbookUpload = $('Upload Workbook to SharePoint').first().json;\nconst userCsvUpload = $('Upload User Directory CSV to SharePoint').first().json;\nconst licCsvUpload = $('Upload Licence Utilisation CSV to SharePoint').first().json;\nconst blockedCsvUpload = $('Upload Blocked Accounts CSV to SharePoint').first().json;\n\nreturn [{\n  json: Object.assign({}, item.json, {\n    _sharePoint: {\n      workbookWebUrl: (workbookUpload && workbookUpload.webUrl) || null,\n      userDirectoryCsvWebUrl: (userCsvUpload && userCsvUpload.webUrl) || null,\n      licenceCsvWebUrl: (licCsvUpload && licCsvUpload.webUrl) || null,\n      blockedCsvWebUrl: (blockedCsvUpload && blockedCsvUpload.webUrl) || null\n    }\n  }),\n  binary: item.binary\n}];"
+      },
+      "id": "code-capture-sharepoint-links",
+      "name": "Capture SharePoint Links",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5460,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Builds the HTML email body (near-verbatim port of the .ps1's template) and the\n// full Graph sendMail request payload, so the HTTP node downstream is a trivial\n// pass-through of json.sendMailPayload rather than a fragile inline expression.\n\nconst item = $input.first();\nconst data = item.json;\nconst meta = data.meta;\nconst kpis = data.kpis;\nconst licenceRows = data.licenceRows;\nconst domainSummary = data.domainSummary;\n\nconst PALETTE = {\n  headerBg: '#1F3864', accent: '#2E5E9E', bandFill: '#F2F5FA',\n  goodBg: '#E2EFDA', goodText: '#375623',\n  watchBg: '#FFF2CC', watchText: '#7F6000',\n  criticalBg: '#FBE5E5', criticalText: '#9C0006'\n};\n\nfunction statusStyle(status) {\n  if (status === 'Critical') return 'background-color:' + PALETTE.criticalBg + '; color:' + PALETTE.criticalText + ';';\n  if (status === 'Watch') return 'background-color:' + PALETTE.watchBg + '; color:' + PALETTE.watchText + ';';\n  return 'background-color:' + PALETTE.goodBg + '; color:' + PALETTE.goodText + ';';\n}\n\nlet licenceHtmlRows = '';\nfor (const l of licenceRows) {\n  const style = statusStyle(l.status);\n  const pct = Math.round(l.utilisation * 1000) / 10;\n  licenceHtmlRows += '\\n<tr>\\n  <td>' + l.licenceSku + '</td>\\n  <td class=\"num\">' + l.totalSeats + '</td>\\n  <td class=\"num\">' + l.assigned + '</td>\\n  <td class=\"num\">' + l.available + '</td>\\n  <td class=\"num\" style=\"' + style + ' font-weight:600;\">' + pct + '%</td>\\n  <td class=\"num\" style=\"' + style + ' font-weight:600;\">' + l.status + '</td>\\n</tr>';\n}\nlicenceHtmlRows += '\\n<tr class=\"totalrow\">\\n  <td>Total</td>\\n  <td class=\"num\">' + kpis.totalSeats + '</td>\\n  <td class=\"num\">' + kpis.totalAssigned + '</td>\\n  <td class=\"num\">' + kpis.totalAvailable + '</td>\\n  <td class=\"num\">' + kpis.totalPct + '%</td>\\n  <td class=\"num\">&mdash;</td>\\n</tr>';\n\nlet domainHtmlRows = '';\nfor (const d of domainSummary) {\n  const share = Math.round(d.shareOfTenant * 1000) / 10;\n  const blockedCell = d.blocked > 0\n    ? '<td class=\"num\" style=\"background-color:' + PALETTE.criticalBg + '; color:' + PALETTE.criticalText + '; font-weight:600;\">' + d.blocked + '</td>'\n    : '<td class=\"num\">' + d.blocked + '</td>';\n  domainHtmlRows += '\\n<tr>\\n  <td>' + d.domain + '</td>\\n  <td class=\"num\">' + d.totalAccounts + '</td>\\n  <td class=\"num\">' + d.active + '</td>\\n  ' + blockedCell + '\\n  <td class=\"num\">' + d.unlicensed + '</td>\\n  <td class=\"num\">' + share + '%</td>\\n</tr>';\n}\n\nconst attachmentName = (item.binary && item.binary.workbook && item.binary.workbook.fileName) || ('M365_Weekly_Report_' + meta.dateStamp + '.xlsx');\nconst archiveLink = (data._sharePoint && data._sharePoint.workbookWebUrl)\n  ? data._sharePoint.workbookWebUrl\n  : 'Not available - the SharePoint upload for this run did not return a link.';\n\nconst bodyHtml = '<!DOCTYPE html>\\n<html>\\n<head>\\n<meta charset=\"utf-8\">\\n<style>\\n' +\n'  body        { font-family: \\'Segoe UI\\', Calibri, Arial, sans-serif; color:#212529; font-size:13px; margin:0; padding:24px; background:#f7f8fa; }\\n' +\n'  .wrap       { max-width:860px; margin:0 auto; background:#ffffff; border:1px solid #dfe3e8; }\\n' +\n'  .masthead   { background:' + PALETTE.headerBg + '; color:#ffffff; padding:22px 28px; }\\n' +\n'  .masthead h1{ margin:0; font-size:19px; font-weight:600; letter-spacing:.3px; }\\n' +\n'  .masthead p { margin:6px 0 0; font-size:12px; color:#c9d6ea; }\\n' +\n'  .content    { padding:24px 28px 8px; }\\n' +\n'  h2          { font-size:14px; color:' + PALETTE.headerBg + '; margin:26px 0 10px; padding-bottom:6px; border-bottom:2px solid ' + PALETTE.accent + '; text-transform:uppercase; letter-spacing:.5px; }\\n' +\n'  h2:first-child { margin-top:0; }\\n' +\n'  p           { line-height:1.6; margin:0 0 12px; }\\n' +\n'  table       { border-collapse:collapse; width:100%; font-size:12.5px; margin-bottom:6px; }\\n' +\n'  th          { background:' + PALETTE.headerBg + '; color:#ffffff; padding:9px 8px; border:1px solid #16294a; text-align:left; font-weight:600; }\\n' +\n'  td          { padding:7px 8px; border:1px solid #dfe3e8; }\\n' +\n'  tr:nth-child(even) td { background:' + PALETTE.bandFill + '; }\\n' +\n'  .num        { text-align:center; }\\n' +\n'  .totalrow td{ font-weight:700; background:#e8ecf3 !important; border-top:2px solid ' + PALETTE.accent + '; }\\n' +\n'  .kpis       { width:100%; border-collapse:separate; border-spacing:8px 0; margin-bottom:4px; }\\n' +\n'  .kpi        { background:' + PALETTE.bandFill + '; border:1px solid #dfe3e8; border-top:3px solid ' + PALETTE.accent + '; padding:12px; text-align:center; width:25%; }\\n' +\n'  .kpi .v     { font-size:22px; font-weight:700; color:' + PALETTE.headerBg + '; display:block; }\\n' +\n'  .kpi .l     { font-size:10.5px; color:#6c757d; text-transform:uppercase; letter-spacing:.6px; }\\n' +\n'  .attach     { background:' + PALETTE.bandFill + '; border-left:4px solid ' + PALETTE.accent + '; padding:12px 14px; margin:18px 0; font-size:12.5px; }\\n' +\n'  .footer     { padding:16px 28px 22px; border-top:1px solid #dfe3e8; color:#8a9099; font-size:11px; line-height:1.6; }\\n' +\n'</style>\\n</head>\\n<body>\\n<div class=\"wrap\">\\n\\n' +\n'  <div class=\"masthead\">\\n    <h1>Microsoft 365 &ndash; Weekly Tenant Report</h1>\\n    <p>' + meta.tenantDisplayName + ' &nbsp;&bull;&nbsp; Week ending ' + meta.reportDateLong + ' &nbsp;&bull;&nbsp; Confidential &ndash; Internal Use Only</p>\\n  </div>\\n\\n' +\n'  <div class=\"content\">\\n\\n' +\n'    <p>Dear Colleague,</p>\\n    <p>Please find below the weekly summary of Microsoft 365 licensing and account status for\\n       ' + meta.tenantDisplayName + '. The complete, worksheet-by-worksheet analysis is attached to this message.</p>\\n\\n' +\n'    <h2>Headline Figures</h2>\\n    <table class=\"kpis\"><tr>\\n      <td class=\"kpi\"><span class=\"v\">' + kpis.totalUsers + '</span><span class=\"l\">Total Accounts</span></td>\\n      <td class=\"kpi\"><span class=\"v\">' + kpis.activeUsers + '</span><span class=\"l\">Active</span></td>\\n      <td class=\"kpi\"><span class=\"v\">' + kpis.blockedUsers + '</span><span class=\"l\">Blocked</span></td>\\n      <td class=\"kpi\"><span class=\"v\">' + kpis.totalPct + '%</span><span class=\"l\">Licence Utilisation</span></td>\\n    </tr></table>\\n\\n' +\n'    <h2>Licence Utilisation</h2>\\n    <table>\\n      <tr>\\n        <th>Licence (SKU)</th><th class=\"num\">Total Seats</th><th class=\"num\">Assigned</th>\\n        <th class=\"num\">Available</th><th class=\"num\">% Utilised</th><th class=\"num\">Status</th>\\n      </tr>\\n      ' + licenceHtmlRows + '\\n    </table>\\n\\n' +\n'    <h2>Account Distribution by Domain</h2>\\n    <table>\\n      <tr>\\n        <th>Domain</th><th class=\"num\">Total</th><th class=\"num\">Active</th>\\n        <th class=\"num\">Blocked</th><th class=\"num\">Unlicensed</th><th class=\"num\">Share</th>\\n      </tr>\\n      ' + domainHtmlRows + '\\n    </table>\\n\\n' +\n'    <div class=\"attach\">\\n      <strong>Attachment:</strong> ' + attachmentName + '<br>\\n      The workbook contains a cover sheet, executive summary, licence utilisation analysis,\\n      a dedicated worksheet for each e-mail domain, a schedule of blocked accounts, and the\\n      full user directory.\\n    </div>\\n\\n' +\n'    <p>Should any figure require clarification, or if additional reporting dimensions are needed,\\n       please contact the ' + meta.reportOwner + '.</p>\\n\\n' +\n'    <p>Kind regards,<br><strong>' + meta.reportOwner + '</strong><br>' + meta.tenantDisplayName + '</p>\\n\\n' +\n'  </div>\\n\\n' +\n'  <div class=\"footer\">\\n    This report was generated automatically on ' + meta.generatedAt + ' and is classified\\n    <strong>Confidential &ndash; Internal Use Only</strong>. It contains personal and licensing data;\\n    please handle it in accordance with the organisation\\'s information security policy.<br>\\n    Archived copy: ' + archiveLink + '\\n  </div>\\n\\n' +\n'</div>\\n</body>\\n</html>';\n\nconst sendMailPayload = {\n  message: {\n    subject: 'Microsoft 365 Weekly Tenant Report - Week Ending ' + meta.dateStamp,\n    importance: 'Normal',\n    body: { contentType: 'HTML', content: bodyHtml },\n    toRecipients: (data.distribution.recipientEmails || []).map(function (e) { return { emailAddress: { address: e } }; }),\n    ccRecipients: (data.distribution.ccEmails || []).map(function (e) { return { emailAddress: { address: e } }; }),\n    attachments: [{\n      '@odata.type': '#microsoft.graph.fileAttachment',\n      name: attachmentName,\n      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',\n      contentBytes: item.binary.workbook.data\n    }]\n  },\n  saveToSentItems: true\n};\n\nreturn [{ json: Object.assign({}, data, { bodyHtml: bodyHtml, sendMailPayload: sendMailPayload }), binary: item.binary }];"
+      },
+      "id": "code-build-email-body",
+      "name": "Build Email Body and Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Standalone-testing gate: when Config.skipEmailSend is true, return zero items so\n// the 'Send Mail' node below simply does not execute - standard n8n behaviour for\n// an empty input, not an error condition.\n\nconst cfg = $('Config').first().json;\nif (cfg.skipEmailSend) {\n  return [];\n}\nreturn $input.all();"
+      },
+      "id": "code-gate-email-send",
+      "name": "Gate Email Send",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.graphBaseUrl }}/users/{{ $json.distribution.senderMailbox }}/sendMail",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.sendMailPayload }}",
+        "options": {}
+      },
+      "id": "http-send-mail",
+      "name": "Send Mail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6240,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "PLACEHOLDER_GRAPH_CREDENTIAL_ID",
+          "name": "Microsoft Graph - App Only (Client Credentials)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Get Organisation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Organisation": {
+      "main": [
+        [
+          {
+            "node": "Handle Organisation Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Organisation Result": {
+      "main": [
+        [
+          {
+            "node": "Get Subscribed SKUs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Subscribed SKUs": {
+      "main": [
+        [
+          {
+            "node": "Filter and Map Licences",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter and Map Licences": {
+      "main": [
+        [
+          {
+            "node": "Get Users (All Pages)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Users (All Pages)": {
+      "main": [
+        [
+          {
+            "node": "Flatten Paginated Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten Paginated Users": {
+      "main": [
+        [
+          {
+            "node": "Normalise Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise Users": {
+      "main": [
+        [
+          {
+            "node": "Compute Domain Segmentation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Domain Segmentation": {
+      "main": [
+        [
+          {
+            "node": "Compute KPIs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute KPIs": {
+      "main": [
+        [
+          {
+            "node": "Blocked and Unlicensed Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Blocked and Unlicensed Accounts": {
+      "main": [
+        [
+          {
+            "node": "Reporting Period Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reporting Period Logic": {
+      "main": [
+        [
+          {
+            "node": "Previous-Week Comparison",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Previous-Week Comparison": {
+      "main": [
+        [
+          {
+            "node": "Assemble Consolidated Report Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Consolidated Report Dataset": {
+      "main": [
+        [
+          {
+            "node": "Build Excel Workbook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Excel Workbook": {
+      "main": [
+        [
+          {
+            "node": "Build CSV Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build CSV Files": {
+      "main": [
+        [
+          {
+            "node": "Upload Workbook to SharePoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Workbook to SharePoint": {
+      "main": [
+        [
+          {
+            "node": "Upload User Directory CSV to SharePoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload User Directory CSV to SharePoint": {
+      "main": [
+        [
+          {
+            "node": "Upload Licence Utilisation CSV to SharePoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Licence Utilisation CSV to SharePoint": {
+      "main": [
+        [
+          {
+            "node": "Upload Blocked Accounts CSV to SharePoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Blocked Accounts CSV to SharePoint": {
+      "main": [
+        [
+          {
+            "node": "Capture SharePoint Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capture SharePoint Links": {
+      "main": [
+        [
+          {
+            "node": "Build Email Body and Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Email Body and Payload": {
+      "main": [
+        [
+          {
+            "node": "Gate Email Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Email Send": {
+      "main": [
+        [
+          {
+            "node": "Send Mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
