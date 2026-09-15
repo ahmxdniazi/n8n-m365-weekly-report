@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-labelledby="title desc">
+  <title id="title">M365 Weekly Report Automation</title>
+  <desc id="desc">An n8n workflow automation banner showing connected nodes flowing from Microsoft 365 data through processing to Excel, SharePoint and email.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#151321"/>
+      <stop offset="55%" stop-color="#241b3f"/>
+      <stop offset="100%" stop-color="#3a1f4d"/>
+    </linearGradient>
+
+    <linearGradient id="edgeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ff6d5a"/>
+      <stop offset="100%" stop-color="#ff9a3d"/>
+    </linearGradient>
+
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff6d5a" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#ff6d5a" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="nodeFill" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2c2540"/>
+      <stop offset="100%" stop-color="#1c1730"/>
+    </linearGradient>
+
+    <linearGradient id="accentNode" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ff8a63"/>
+      <stop offset="100%" stop-color="#ff6d5a"/>
+    </linearGradient>
+
+    <filter id="softShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="1.4" cy="1.4" r="1.4" fill="#ffffff" opacity="0.05"/>
+    </pattern>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="300" fill="url(#bg)"/>
+  <rect width="1200" height="300" fill="url(#dots)"/>
+  <circle cx="140" cy="60" r="220" fill="url(#glow)"/>
+  <circle cx="1080" cy="260" r="240" fill="url(#glow)"/>
+
+  <!-- Connector line (drawn first, under nodes) -->
+  <g stroke="url(#edgeGrad)" stroke-width="3" fill="none" opacity="0.9">
+    <path d="M 165 150 H 305" />
+    <path d="M 165 150 C 220 150, 220 90, 305 90" />
+    <path d="M 165 150 C 220 150, 220 210, 305 210" />
+    <path d="M 385 90 C 440 90, 440 150, 495 150" />
+    <path d="M 385 210 C 440 210, 440 150, 495 150" />
+    <path d="M 575 150 H 715" />
+    <path d="M 795 150 C 850 150, 850 90, 905 90" />
+    <path d="M 795 150 C 850 150, 850 150, 905 150" />
+    <path d="M 795 150 C 850 150, 850 210, 905 210" />
+  </g>
+
+  <!-- Flow direction dots -->
+  <g fill="#ffd8a8">
+    <circle cx="235" cy="150" r="3.2"/>
+    <circle cx="655" cy="150" r="3.2"/>
+    <circle cx="855" cy="150" r="3.2"/>
+  </g>
+
+  <!-- Node: Schedule Trigger -->
+  <g filter="url(#softShadow)">
+    <circle cx="95" cy="150" r="42" fill="url(#accentNode)"/>
+    <path d="M95 128 v22 l15 15" stroke="#241b3f" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="95" cy="150" r="42" fill="none" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1.5"/>
+  </g>
+  <text x="95" y="211" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#e8e2f5" font-weight="600">Schedule</text>
+
+  <!-- Node: Microsoft Graph (Users/Licences) -->
+  <g filter="url(#softShadow)">
+    <rect x="305" y="58" width="80" height="64" rx="14" fill="url(#nodeFill)" stroke="#463a68" stroke-width="1.5"/>
+    <g transform="translate(325,72)">
+      <rect x="0" y="0" width="16" height="16" fill="#ff8f6b"/>
+      <rect x="18" y="0" width="16" height="16" fill="#8fd3ff"/>
+      <rect x="0" y="18" width="16" height="16" fill="#a3e6b0"/>
+      <rect x="18" y="18" width="16" height="16" fill="#ffe08a"/>
+    </g>
+  </g>
+  <text x="345" y="140" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e2f5" font-weight="600">M365 Graph</text>
+
+  <!-- Node: SharePoint / Users -->
+  <g filter="url(#softShadow)">
+    <rect x="305" y="178" width="80" height="64" rx="14" fill="url(#nodeFill)" stroke="#463a68" stroke-width="1.5"/>
+    <circle cx="345" cy="210" r="16" fill="none" stroke="#8fd3ff" stroke-width="3"/>
+    <circle cx="345" cy="210" r="6" fill="#8fd3ff"/>
+  </g>
+  <text x="345" y="260" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e2f5" font-weight="600">Directory</text>
+
+  <!-- Node: n8n Processing / AI core -->
+  <g filter="url(#softShadow)">
+    <rect x="495" y="100" width="100" height="100" rx="20" fill="url(#accentNode)"/>
+    <g stroke="#241b3f" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M525 150 h50"/>
+      <path d="M545 130 v40"/>
+      <circle cx="525" cy="150" r="5" fill="#241b3f" stroke="none"/>
+      <circle cx="575" cy="150" r="5" fill="#241b3f" stroke="none"/>
+      <circle cx="545" cy="130" r="5" fill="#241b3f" stroke="none"/>
+      <circle cx="545" cy="170" r="5" fill="#241b3f" stroke="none"/>
+    </g>
+  </g>
+  <text x="545" y="222" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#ffffff" font-weight="700">n8n Engine</text>
+  <text x="545" y="238" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="10.5" fill="#f4e3da">KPIs &#8226; Analysis</text>
+
+  <!-- Node: Excel Workbook -->
+  <g filter="url(#softShadow)">
+    <rect x="715" y="118" width="80" height="64" rx="14" fill="url(#nodeFill)" stroke="#463a68" stroke-width="1.5"/>
+    <rect x="732" y="132" width="46" height="36" rx="4" fill="none" stroke="#a3e6b0" stroke-width="2.5"/>
+    <path d="M732 144 h46 M732 156 h46 M747 132 v36 M763 132 v36" stroke="#a3e6b0" stroke-width="1.5"/>
+  </g>
+  <text x="755" y="200" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e2f5" font-weight="600">Workbook</text>
+
+  <!-- Node: SharePoint Archive -->
+  <g filter="url(#softShadow)">
+    <rect x="905" y="58" width="80" height="64" rx="14" fill="url(#nodeFill)" stroke="#463a68" stroke-width="1.5"/>
+    <path d="M925 100 l20 -26 20 26 z" fill="none" stroke="#8fd3ff" stroke-width="2.5" stroke-linejoin="round"/>
+    <circle cx="945" cy="90" r="6" fill="#8fd3ff"/>
+  </g>
+  <text x="945" y="140" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e2f5" font-weight="600">SharePoint</text>
+
+  <!-- Node: CSV export -->
+  <g filter="url(#softShadow)">
+    <rect x="905" y="118" width="80" height="64" rx="14" fill="url(#nodeFill)" stroke="#463a68" stroke-width="1.5"/>
+    <path d="M925 132 h40 v36 h-40 z" fill="none" stroke="#ffe08a" stroke-width="2.5"/>
+    <path d="M925 144 h40 M925 156 h40" stroke="#ffe08a" stroke-width="1.5"/>
+  </g>
+  <text x="945" y="200" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e2f5" font-weight="600">CSV Export</text>
+
+  <!-- Node: Email -->
+  <g filter="url(#softShadow)">
+    <rect x="905" y="178" width="80" height="64" rx="14" fill="url(#nodeFill)" stroke="#463a68" stroke-width="1.5"/>
+    <path d="M918 196 h54 v28 h-54 z" fill="none" stroke="#ff8f6b" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M918 196 l27 18 27 -18" fill="none" stroke="#ff8f6b" stroke-width="2.5" stroke-linejoin="round"/>
+  </g>
+  <text x="945" y="260" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e2f5" font-weight="600">Email Report</text>
+
+  <!-- Title block -->
+  <text x="600" y="42" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#ffffff" letter-spacing="0.5">M365 Weekly Report Automation</text>
+  <text x="600" y="66" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" fill="#c9bfe0">AI-Assisted Workflow Automation &#8226; Built with n8n &#38; Microsoft Graph</text>
+</svg>
